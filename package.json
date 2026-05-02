@@ -9,7 +9,7 @@
     "make-secret": "node scripts/make-room-secret.js"
   },
   "engines": {
-    "node": ">=20"
+    "node": "22.x"
   },
   "dependencies": {
     "cors": "^2.8.5",
@@ -20,4 +20,3 @@
     "socket.io": "^4.8.1"
   }
 }
-

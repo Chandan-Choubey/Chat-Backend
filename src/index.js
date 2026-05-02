@@ -26,12 +26,6 @@ app.use(
   })
 );
 
-app.options('*', cors({
-  origin: validateOrigin,
-  methods: ['GET', 'POST'],
-  credentials: false
-}));
-
 app.use(
   rateLimit({
     windowMs: 15 * 60 * 1000,
@@ -252,17 +246,12 @@ function isBase64Url(value, minLength, maxLength) {
 }
 
 function validateOrigin(origin, callback) {
-  console.log('Incoming origin:', origin);
-
-  if (!origin) {
-    return callback(null, true);
+  if (!origin || config.clientOrigins.includes(origin)) {
+    callback(null, true);
+    return;
   }
 
-  if (config.clientOrigins.includes(origin)) {
-    return callback(null, true);
-  }
-
-  return callback(null, true);
+  callback(new Error('Origin is not allowed.'));
 }
 
 function cryptoRandomId() {
