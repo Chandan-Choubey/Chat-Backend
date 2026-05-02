@@ -12,6 +12,11 @@ const tokenSecret = process.env.CHAT_TOKEN_SECRET || (!isProduction ? crypto.ran
 const tokenTtlMinutes = numberFromEnv('TOKEN_TTL_MINUTES', 20);
 const messageMaxLength = numberFromEnv('MESSAGE_MAX_LENGTH', 1200);
 const encryptedMessageMaxLength = numberFromEnv('ENCRYPTED_MESSAGE_MAX_LENGTH', 6000);
+const clientOrigins = originListFromEnv('CLIENT_ORIGIN', [
+  'http://localhost:5173',
+  'https://chat-frontend-blond-two.vercel.app',
+  'https://chat-frontend-cwm8.onrender.com'
+]);
 
 const errors = [];
 const warnings = [];
@@ -52,6 +57,10 @@ if (encryptedMessageMaxLength < 500 || encryptedMessageMaxLength > 20000) {
   errors.push('ENCRYPTED_MESSAGE_MAX_LENGTH must be between 500 and 20000.');
 }
 
+if (clientOrigins.length === 0) {
+  errors.push('CLIENT_ORIGIN must include at least one valid frontend origin.');
+}
+
 if (errors.length > 0) {
   throw new Error(`Configuration error:\n- ${errors.join('\n- ')}`);
 }
@@ -63,7 +72,7 @@ for (const warning of warnings) {
 export const config = Object.freeze({
   isProduction,
   port: numberFromEnv('PORT', 4000),
-  clientOrigins: listFromEnv('CLIENT_ORIGIN', ['https://chat-frontend-blond-two.vercel.app']),   
+  clientOrigins,
   roomId,
   accessProofHash,
   password,
@@ -87,6 +96,21 @@ function listFromEnv(name, fallback) {
     .filter(Boolean);
 }
 
+function originListFromEnv(name, fallback) {
+  return listFromEnv(name, fallback)
+    .map(normalizeOrigin)
+    .filter(Boolean);
+}
+
+function normalizeOrigin(value) {
+  try {
+    return new URL(value).origin;
+  } catch {
+    warnings.push(`Ignoring invalid ${value} entry in CLIENT_ORIGIN.`);
+    return null;
+  }
+}
+
 function numberFromEnv(name, fallback) {
   const raw = process.env[name];
   if (!raw) {
@@ -96,4 +120,3 @@ function numberFromEnv(name, fallback) {
   const value = Number(raw);
   return Number.isFinite(value) ? value : fallback;
 }
-

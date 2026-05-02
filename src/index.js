@@ -194,6 +194,7 @@ io.on('connection', (socket) => {
 server.listen(config.port, () => {
   console.log(`Secure chat backend listening on http://localhost:${config.port}`);
   console.log(`Room route: /chat/${config.roomId}`);
+  console.log(`Allowed client origins: ${config.clientOrigins.join(', ')}`);
 });
 
 function broadcastPresence() {
@@ -251,6 +252,7 @@ function validateOrigin(origin, callback) {
     return;
   }
 
+  console.warn(`Rejected CORS origin: ${origin}`);
   callback(new Error('Origin is not allowed.'));
 }
 
