@@ -63,7 +63,7 @@ for (const warning of warnings) {
 export const config = Object.freeze({
   isProduction,
   port: numberFromEnv('PORT', 4000),
-  clientOrigins: listFromEnv('CLIENT_ORIGIN', ['http://localhost:5173']),
+  clientOrigins: listFromEnv('CLIENT_ORIGIN', ['https://chat-frontend-blond-two.vercel.app']),   
   roomId,
   accessProofHash,
   password,
