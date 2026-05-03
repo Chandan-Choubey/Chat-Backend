@@ -9,7 +9,7 @@ const roomId = process.env.CHAT_ROOM_ID || 'private-room';
 const accessProofHash = process.env.CHAT_ACCESS_PROOF_HASH?.trim();
 const password = process.env.CHAT_PASSWORD;
 const tokenSecret = process.env.CHAT_TOKEN_SECRET || (!isProduction ? crypto.randomBytes(32).toString('base64url') : '');
-const tokenTtlMinutes = numberFromEnv('TOKEN_TTL_MINUTES', 20);
+const tokenTtlMinutes = numberFromEnv('TOKEN_TTL_MINUTES', 43200);
 const messageMaxLength = numberFromEnv('MESSAGE_MAX_LENGTH', 1200);
 const encryptedMessageMaxLength = numberFromEnv('ENCRYPTED_MESSAGE_MAX_LENGTH', 6000);
 const clientOrigins = originListFromEnv('CLIENT_ORIGIN', [
@@ -45,8 +45,8 @@ if (!tokenSecret || tokenSecret.length < 32) {
   errors.push('CHAT_TOKEN_SECRET must be at least 32 characters.');
 }
 
-if (tokenTtlMinutes < 5 || tokenTtlMinutes > 240) {
-  errors.push('TOKEN_TTL_MINUTES must be between 5 and 240.');
+if (tokenTtlMinutes < 5 || tokenTtlMinutes > 525600) {
+  errors.push('TOKEN_TTL_MINUTES must be between 5 and 525600.');
 }
 
 if (messageMaxLength < 1 || messageMaxLength > 4000) {
