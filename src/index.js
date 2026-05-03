@@ -6,12 +6,14 @@ import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { Server } from 'socket.io';
 import { config } from './config.js';
+import { pushNotificationsEnabled, sendIncomingMessagePush } from './push-notifications.js';
 import { verifyAccessProof } from './secure-room.js';
 import { createRoomToken, verifyRoomToken } from './tokens.js';
 
 const app = express();
 const server = http.createServer(app);
 const participants = new Map();
+const pushTokensByUser = new Map();
 
 app.disable('x-powered-by');
 app.set('trust proxy', 1);
@@ -57,7 +59,12 @@ const joinLimiter = rateLimit({
 });
 
 app.get('/api/health', (req, res) => {
-  res.json({ ok: true, roomId: config.roomId, activeParticipants: participants.size });
+  res.json({
+    ok: true,
+    roomId: config.roomId,
+    activeParticipants: participants.size,
+    pushEnabled: pushNotificationsEnabled()
+  });
 });
 
 app.post('/api/rooms/:roomId/join', joinLimiter, async (req, res) => {
@@ -100,6 +107,40 @@ app.post('/api/rooms/:roomId/join', joinLimiter, async (req, res) => {
     displayName,
     capacity: config.roomCapacity
   });
+});
+
+app.post('/api/rooms/:roomId/push-token', authenticateRoomRequest, (req, res) => {
+  const pushToken = normalizePushToken(req.body?.pushToken);
+  if (!pushToken) {
+    res.status(400).json({ error: 'Invalid push token.' });
+    return;
+  }
+
+  removePushTokens([pushToken]);
+  const userTokens = pushTokensByUser.get(req.roomUser.userId) || new Set();
+  userTokens.add(pushToken);
+  pushTokensByUser.set(req.roomUser.userId, userTokens);
+
+  res.json({ ok: true, pushEnabled: pushNotificationsEnabled() });
+});
+
+app.delete('/api/rooms/:roomId/push-token', authenticateRoomRequest, (req, res) => {
+  const pushToken = normalizePushToken(req.body?.pushToken);
+  if (!pushToken) {
+    pushTokensByUser.delete(req.roomUser.userId);
+    res.json({ ok: true });
+    return;
+  }
+
+  const userTokens = pushTokensByUser.get(req.roomUser.userId);
+  if (userTokens) {
+    userTokens.delete(pushToken);
+    if (userTokens.size === 0) {
+      pushTokensByUser.delete(req.roomUser.userId);
+    }
+  }
+
+  res.json({ ok: true });
 });
 
 const io = new Server(server, {
@@ -159,13 +200,16 @@ io.on('connection', (socket) => {
       return;
     }
 
-    io.to(config.roomId).emit('message:new', {
+    const outgoingMessage = {
       id: cryptoRandomId(),
       senderId: user.userId,
       senderName: participant.displayName,
       encrypted,
       sentAt: new Date().toISOString()
-    });
+    };
+
+    io.to(config.roomId).emit('message:new', outgoingMessage);
+    sendPushToOtherParticipants(user.userId, participant.displayName);
   });
 
   socket.on('typing', (payload = {}) => {
@@ -204,6 +248,84 @@ function broadcastPresence() {
   });
 }
 
+function authenticateRoomRequest(req, res, next) {
+  if (req.params.roomId !== config.roomId) {
+    res.status(404).json({ error: 'Room not found.' });
+    return;
+  }
+
+  try {
+    const token = bearerTokenFromHeader(req.get('authorization'));
+    req.roomUser = verifyRoomToken(token, {
+      roomId: config.roomId,
+      secret: config.tokenSecret
+    });
+    next();
+  } catch (error) {
+    res.status(401).json({ error: error.message || 'Unauthorized.' });
+  }
+}
+
+function bearerTokenFromHeader(value) {
+  if (typeof value !== 'string') {
+    throw new Error('Missing token.');
+  }
+
+  const [type, token, extra] = value.split(/\s+/);
+  if (type !== 'Bearer' || !token || extra) {
+    throw new Error('Invalid token.');
+  }
+
+  return token;
+}
+
+function sendPushToOtherParticipants(senderId, senderName) {
+  const tokens = listPushTokensExcept(senderId);
+  if (tokens.length === 0) {
+    return;
+  }
+
+  sendIncomingMessagePush({
+    tokens,
+    roomId: config.roomId,
+    senderName
+  })
+    .then(removePushTokens)
+    .catch((error) => {
+      console.warn(`Unable to send push notification: ${error.message}`);
+    });
+}
+
+function listPushTokensExcept(senderId) {
+  const tokens = [];
+  for (const [userId, userTokens] of pushTokensByUser.entries()) {
+    if (userId === senderId) {
+      continue;
+    }
+
+    tokens.push(...userTokens);
+  }
+
+  return tokens;
+}
+
+function removePushTokens(tokens) {
+  if (!Array.isArray(tokens) || tokens.length === 0) {
+    return;
+  }
+
+  const invalidTokens = new Set(tokens);
+  for (const [userId, userTokens] of pushTokensByUser.entries()) {
+    for (const token of invalidTokens) {
+      userTokens.delete(token);
+    }
+
+    if (userTokens.size === 0) {
+      pushTokensByUser.delete(userId);
+    }
+  }
+}
+
 function listParticipants() {
   return [...participants.values()].map((participant) => ({
     userId: participant.userId,
@@ -222,6 +344,19 @@ function normalizeDisplayName(value) {
   }
 
   return normalized;
+}
+
+function normalizePushToken(value) {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const token = value.trim();
+  if (token.length < 20 || token.length > 4096 || !/^[a-zA-Z0-9:_-]+$/.test(token)) {
+    return null;
+  }
+
+  return token;
 }
 
 function normalizeEncryptedPayload(encrypted) {

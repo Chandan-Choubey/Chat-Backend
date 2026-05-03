@@ -3,6 +3,8 @@ import crypto from 'node:crypto';
 import { isScryptHash } from './secure-room.js';
 
 const ROOM_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_-]{2,63}$/;
+const errors = [];
+const warnings = [];
 
 const isProduction = process.env.NODE_ENV === 'production';
 const roomId = process.env.CHAT_ROOM_ID || 'private-room';
@@ -12,14 +14,12 @@ const tokenSecret = process.env.CHAT_TOKEN_SECRET || (!isProduction ? crypto.ran
 const tokenTtlMinutes = numberFromEnv('TOKEN_TTL_MINUTES', 43200);
 const messageMaxLength = numberFromEnv('MESSAGE_MAX_LENGTH', 1200);
 const encryptedMessageMaxLength = numberFromEnv('ENCRYPTED_MESSAGE_MAX_LENGTH', 6000);
+const firebaseServiceAccount = firebaseServiceAccountFromEnv('FIREBASE_SERVICE_ACCOUNT_BASE64');
 const clientOrigins = originListFromEnv('CLIENT_ORIGIN', [
   'http://localhost:5173',
   'https://chat-frontend-blond-two.vercel.app',
   'https://chat-frontend-cwm8.onrender.com'
 ]);
-
-const errors = [];
-const warnings = [];
 
 if (!ROOM_ID_PATTERN.test(roomId)) {
   errors.push('CHAT_ROOM_ID must be 3-64 characters and use letters, numbers, underscores, or hyphens.');
@@ -80,6 +80,7 @@ export const config = Object.freeze({
   tokenTtlMs: tokenTtlMinutes * 60 * 1000,
   messageMaxLength,
   encryptedMessageMaxLength,
+  firebaseServiceAccount,
   requireHttps: isProduction && process.env.REQUIRE_HTTPS !== 'false',
   roomCapacity: 2
 });
@@ -119,4 +120,25 @@ function numberFromEnv(name, fallback) {
 
   const value = Number(raw);
   return Number.isFinite(value) ? value : fallback;
+}
+
+function firebaseServiceAccountFromEnv(name) {
+  const raw = process.env[name]?.trim();
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    const decoded = Buffer.from(raw, 'base64').toString('utf8');
+    const serviceAccount = JSON.parse(decoded);
+    if (!serviceAccount.project_id || !serviceAccount.client_email || !serviceAccount.private_key) {
+      errors.push(`${name} must decode to a Firebase service account JSON file.`);
+      return null;
+    }
+
+    return serviceAccount;
+  } catch {
+    errors.push(`${name} must be a base64 encoded Firebase service account JSON file.`);
+    return null;
+  }
 }
